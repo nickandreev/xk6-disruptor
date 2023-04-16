@@ -16,6 +16,8 @@ type PodBuilder interface {
 	WithLabels(labels map[string]string) PodBuilder
 	// WithStatus sets the PodPhase for the pod  to be built
 	WithStatus(status corev1.PodPhase) PodBuilder
+	// WithContainerPort adds port to all containers for the pod to be build
+	WithContainerPort(port uint) PodBuilder
 }
 
 // podBuilder defines the attributes for building a pod
@@ -55,6 +57,14 @@ func (b *podBuilder) WithStatus(phase corev1.PodPhase) PodBuilder {
 
 func (b *podBuilder) WithLabels(labels map[string]string) PodBuilder {
 	b.labels = labels
+	return b
+}
+
+func (b *podBuilder) WithContainerPort(port uint) PodBuilder {
+	for i := range b.containers {
+		b.containers[i].Ports = append(b.containers[i].Ports, corev1.ContainerPort{ContainerPort: int32(port)})
+	}
+
 	return b
 }
 

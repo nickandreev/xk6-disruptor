@@ -3,6 +3,7 @@ package disruptors
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/grafana/xk6-disruptor/pkg/kubernetes"
@@ -55,6 +56,7 @@ type podDisruptor struct {
 	ctx        context.Context
 	selector   PodSelector
 	controller AgentController
+	k8s        kubernetes.Kubernetes
 }
 
 // NewPodDisruptor creates a new instance of a PodDisruptor that acts on the pods
@@ -92,6 +94,7 @@ func NewPodDisruptor(
 		ctx:        ctx,
 		selector:   selector,
 		controller: controller,
+		k8s:        k8s,
 	}, nil
 }
 
@@ -104,13 +107,57 @@ func (d *podDisruptor) Targets() ([]string, error) {
 func (d *podDisruptor) InjectHTTPFaults(fault HTTPFault, duration uint, options HTTPDisruptionOptions) error {
 	cmd := buildHTTPFaultCmd(fault, duration, options)
 
-	err := d.controller.ExecCommand(cmd)
+	err := d.validateTargetPort(fault.Port)
+	if err != nil {
+		return err
+	}
+
+	err = d.controller.ExecCommand(cmd)
 	return err
 }
 
 // InjectGrpcFaults injects faults in the grpc requests sent to the disruptor's targets
 func (d *podDisruptor) InjectGrpcFaults(fault GrpcFault, duration uint, options GrpcDisruptionOptions) error {
 	cmd := buildGrpcFaultCmd(fault, duration, options)
-	err := d.controller.ExecCommand(cmd)
+
+	err := d.validateTargetPort(fault.Port)
+	if err != nil {
+		return err
+	}
+
+	err = d.controller.ExecCommand(cmd)
 	return err
+}
+
+func (d *podDisruptor) validateTargetPort(targetPort uint) error {
+	if targetPort == 0 {
+		targetPort = 80
+	}
+
+	targets, err := d.controller.Targets()
+	if err != nil {
+		return err
+	}
+
+	for _, target := range targets {
+		pod, err := d.k8s.CoreV1().Pods(d.selector.Namespace).Get(d.ctx, target, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		found := false
+		for _, container := range pod.Spec.Containers {
+			for _, containerPort := range container.Ports {
+				if uint(containerPort.ContainerPort) == targetPort {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			return fmt.Errorf("target %q doesn't listen to port %d", target, targetPort)
+		}
+	}
+
+	return nil
 }

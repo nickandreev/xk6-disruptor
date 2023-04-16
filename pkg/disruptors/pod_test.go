@@ -5,8 +5,13 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/grafana/xk6-disruptor/pkg/kubernetes"
 	"github.com/grafana/xk6-disruptor/pkg/testutils/command"
+	"github.com/grafana/xk6-disruptor/pkg/testutils/kubernetes/builders"
 	"github.com/grafana/xk6-disruptor/pkg/utils/process"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 type fakeAgentController struct {
@@ -39,11 +44,12 @@ func (f *fakeAgentController) Visit(visitor func(string) []string) error {
 	return nil
 }
 
-func newPodDisruptorForTesting(ctx context.Context, selector PodSelector, controller AgentController) PodDisruptor {
+func newPodDisruptorForTesting(ctx context.Context, selector PodSelector, controller AgentController, k8s kubernetes.Kubernetes) PodDisruptor {
 	return &podDisruptor{
 		ctx:        ctx,
 		selector:   selector,
 		controller: controller,
+		k8s:        k8s,
 	}
 }
 
@@ -51,15 +57,16 @@ func Test_PodHTTPFaultInjection(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		title       string
-		selector    PodSelector
-		targets     []string
-		expectedCmd string
-		expectError bool
-		cmdError    error
-		fault       HTTPFault
-		opts        HTTPDisruptionOptions
-		duration    uint
+		title         string
+		selector      PodSelector
+		targets       []string
+		containerPort uint
+		expectedCmd   string
+		expectError   bool
+		cmdError      error
+		fault         HTTPFault
+		opts          HTTPDisruptionOptions
+		duration      uint
 	}{
 		{
 			title: "Test error 500",
@@ -162,6 +169,42 @@ func Test_PodHTTPFaultInjection(t *testing.T) {
 			opts:        HTTPDisruptionOptions{},
 			duration:    60,
 		},
+		{
+			title: "Default container port not found ",
+			selector: PodSelector{
+				Namespace: "testns",
+				Select: PodAttributes{
+					Labels: map[string]string{
+						"app": "myapp",
+					},
+				},
+			},
+			targets:       []string{"my-app-pod"},
+			containerPort: 90,
+			expectedCmd:   "xk6-disruptor-agent http -d 60s",
+			expectError:   true,
+			fault:         HTTPFault{},
+			opts:          HTTPDisruptionOptions{},
+			duration:      60,
+		},
+		{
+			title: "Container port not found ",
+			selector: PodSelector{
+				Namespace: "testns",
+				Select: PodAttributes{
+					Labels: map[string]string{
+						"app": "myapp",
+					},
+				},
+			},
+			targets:       []string{"my-app-pod"},
+			containerPort: 8081,
+			expectedCmd:   "xk6-disruptor-agent http -d 60s",
+			expectError:   true,
+			fault:         HTTPFault{Port: 8080},
+			opts:          HTTPDisruptionOptions{},
+			duration:      60,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -177,7 +220,25 @@ func Test_PodHTTPFaultInjection(t *testing.T) {
 				executor:  executor,
 			}
 
-			d := newPodDisruptorForTesting(context.TODO(), tc.selector, controller)
+			objs := []runtime.Object{}
+
+			for _, target := range tc.targets {
+				port := tc.containerPort
+				if port == 0 {
+					port = 80
+				}
+				obj := builders.NewPodBuilder(target).
+					WithContainerPort(port).
+					WithLabels(tc.selector.Select.Labels).
+					WithNamespace(tc.selector.Namespace).
+					Build()
+				objs = append(objs, obj)
+			}
+
+			client := fake.NewSimpleClientset(objs...)
+			k, _ := kubernetes.NewFakeKubernetes(client)
+
+			d := newPodDisruptorForTesting(context.TODO(), tc.selector, controller, k)
 
 			err := d.InjectHTTPFaults(tc.fault, tc.duration, tc.opts)
 
@@ -207,15 +268,16 @@ func Test_PodGrpcPFaultInjection(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		title       string
-		selector    PodSelector
-		targets     []string
-		fault       GrpcFault
-		opts        GrpcDisruptionOptions
-		duration    uint
-		expectedCmd string
-		expectError bool
-		cmdError    error
+		title         string
+		selector      PodSelector
+		targets       []string
+		containerPort uint
+		fault         GrpcFault
+		opts          GrpcDisruptionOptions
+		duration      uint
+		expectedCmd   string
+		expectError   bool
+		cmdError      error
 	}{
 		{
 			title: "Test error",
@@ -319,6 +381,42 @@ func Test_PodGrpcPFaultInjection(t *testing.T) {
 			expectError: true,
 			cmdError:    fmt.Errorf("error executing command"),
 		},
+		{
+			title: "Default container port not found ",
+			selector: PodSelector{
+				Namespace: "testns",
+				Select: PodAttributes{
+					Labels: map[string]string{
+						"app": "myapp",
+					},
+				},
+			},
+			targets:       []string{"my-app-pod"},
+			containerPort: 90,
+			expectedCmd:   "xk6-disruptor-agent http -d 60s",
+			expectError:   true,
+			fault:         GrpcFault{},
+			opts:          GrpcDisruptionOptions{},
+			duration:      60,
+		},
+		{
+			title: "Container port not found ",
+			selector: PodSelector{
+				Namespace: "testns",
+				Select: PodAttributes{
+					Labels: map[string]string{
+						"app": "myapp",
+					},
+				},
+			},
+			targets:       []string{"my-app-pod"},
+			containerPort: 8081,
+			expectedCmd:   "xk6-disruptor-agent http -d 60s",
+			expectError:   true,
+			fault:         GrpcFault{Port: 8080},
+			opts:          GrpcDisruptionOptions{},
+			duration:      60,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -334,7 +432,25 @@ func Test_PodGrpcPFaultInjection(t *testing.T) {
 				executor:  executor,
 			}
 
-			d := newPodDisruptorForTesting(context.TODO(), tc.selector, controller)
+			objs := []runtime.Object{}
+
+			for _, target := range tc.targets {
+				port := tc.containerPort
+				if port == 0 {
+					port = 80
+				}
+				obj := builders.NewPodBuilder(target).
+					WithContainerPort(port).
+					WithLabels(tc.selector.Select.Labels).
+					WithNamespace(tc.selector.Namespace).
+					Build()
+				objs = append(objs, obj)
+			}
+
+			client := fake.NewSimpleClientset(objs...)
+			k, _ := kubernetes.NewFakeKubernetes(client)
+
+			d := newPodDisruptorForTesting(context.TODO(), tc.selector, controller, k)
 
 			err := d.InjectGrpcFaults(tc.fault, tc.duration, tc.opts)
 

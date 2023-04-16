@@ -107,7 +107,7 @@ func Test_PodDisruptor(t *testing.T) {
 				options := disruptors.PodDisruptorOptions{}
 				disruptor, err := disruptors.NewPodDisruptor(context.TODO(), k8s, selector, options)
 				if err != nil {
-					t.Errorf("error creating selector: %v", err)
+					t.Errorf("error creating disruptor: %v", err)
 					return
 				}
 
@@ -150,7 +150,7 @@ func Test_PodDisruptor(t *testing.T) {
 	// Test Fault injection in Grpc service.
 	// We must use a NodePort to access the service, so to prevent port collision between
 	// tests, we will deploy one service to expose the pods created for each
-	// test. Tests cannot be therefore executed in parallel. 
+	// test. Tests cannot be therefore executed in parallel.
 	t.Run("Test Grpc fault injection", func(t *testing.T) {
 		t.Parallel()
 
@@ -168,10 +168,10 @@ func Test_PodDisruptor(t *testing.T) {
 			{
 				title: "Inject Grpc error",
 				fault: disruptors.GrpcFault{
-					Port:      9000,
-					ErrorRate: 1.0,
+					Port:       9000,
+					ErrorRate:  1.0,
 					StatusCode: 14,
-					Exclude: "grpc.reflection.v1alpha.ServerReflection,grpc.reflection.v1.ServerReflection",
+					Exclude:    "grpc.reflection.v1alpha.ServerReflection,grpc.reflection.v1.ServerReflection",
 				},
 				options: disruptors.GrpcDisruptionOptions{
 					ProxyPort: 3000,
@@ -217,7 +217,7 @@ func Test_PodDisruptor(t *testing.T) {
 				options := disruptors.PodDisruptorOptions{}
 				disruptor, err := disruptors.NewPodDisruptor(context.TODO(), k8s, selector, options)
 				if err != nil {
-					t.Errorf("error creating selector: %v", err)
+					t.Errorf("error creating disruptor: %v", err)
 					return
 				}
 
@@ -239,7 +239,7 @@ func Test_PodDisruptor(t *testing.T) {
 				err = checks.CheckGrpcService(
 					k8s,
 					checks.GrpcServiceCheck{
-						Delay: 		10*time.Second,
+						Delay:          10 * time.Second,
 						Host:           "localhost",
 						Port:           int(grpcPort.HostPort),
 						Service:        tc.service,
